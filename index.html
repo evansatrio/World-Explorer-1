@@ -1,0 +1,1742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ff8c42">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="World Quiz">
+<title>World Country Guessing Game</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+<style>
+  /* ===========================================================
+     Light theme palette — light blue water + dark grey land
+     - Page bg:    #eef2f7  (very light cool grey)
+     - Card bg:    #ffffff
+     - Water:      #c8e4ee  light blue, with #88b4cc subtle wave pattern
+     - Country:    #5e6873  dark grey (strong lightness contrast with water)
+     - Hover:      #7a8590  lighter dark grey on hover
+     - Borders:    #ffffff between countries, #d0d6e0 in UI
+     - Text:       #1a2845 primary, #5a6a85 secondary
+     - Accent:     #ff8c42 (warm orange)
+     - Correct:    #4caf50, Wrong: #e57373, Selected: #ff8c42
+     ============================================================ */
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    /* Slightly darker grey-blue body so the centred phone frame is visible on desktop */
+    background: #b8c4d0;
+    color: #1a2845;
+    height: 100vh;
+    overflow: hidden;
+  }
+  /* Phone-portrait container — sized for Samsung Galaxy S26 Ultra (CSS viewport 480×1040) */
+  .screen {
+    max-width: 480px;
+    width: 100%;
+    height: 100vh;
+    max-height: 1040px;
+    margin: 0 auto;
+    background: #ffffff;
+  }
+  /* Desktop preview: render as a phone-frame mockup with bezel & shadow */
+  @media (min-width: 481px), (min-height: 1041px) {
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 12px;
+    }
+    .screen {
+      width: 480px;
+      height: min(1040px, calc(100vh - 24px));
+      border-radius: 28px;
+      overflow: hidden;
+      box-shadow:
+        0 0 0 6px #1f1f1f,
+        0 0 0 8px #3a3a3a,
+        0 25px 60px rgba(0, 0, 0, 0.35);
+    }
+  }
+  /* On a real phone (≤480px viewport, e.g. S26 Ultra in portrait): fill the screen edge-to-edge */
+  @media (max-width: 480px) {
+    body { background: #ffffff; padding: 0; }
+    .screen {
+      width: 100%;
+      height: 100vh;
+      max-height: none;
+      border-radius: 0;
+      box-shadow: none;
+    }
+  }
+  kbd {
+    background: #f1f3f5;
+    border: 1px solid #d0d6e0;
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-family: monospace;
+    font-size: 0.85em;
+    color: #1a2845;
+  }
+
+  .screen {
+    width: 100vw;
+    height: 100vh;
+    position: absolute;
+    top: 0; left: 0;
+    display: none;
+    flex-direction: column;
+  }
+  .screen.active { display: flex; }
+
+  /* ============ NAME SCREEN ============ */
+  #screen-name {
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, #eef2f7 0%, #d6e2ed 100%);
+  }
+  #screen-name .card {
+    background: #ffffff;
+    padding: 50px 60px;
+    border-radius: 16px;
+    box-shadow: 0 8px 30px rgba(26, 40, 69, 0.12);
+    text-align: center;
+    max-width: 500px;
+  }
+  #screen-name h1 {
+    font-size: 2.5em;
+    margin: 0 0 10px;
+    color: #ff8c42;
+  }
+  #screen-name p {
+    color: #5a6a85;
+    margin: 0 0 30px;
+    font-size: 1.05em;
+    line-height: 1.5;
+  }
+  #screen-name input {
+    padding: 14px 20px;
+    font-size: 1.1em;
+    width: 100%;
+    border: 2px solid #d0d6e0;
+    background: #f8fafc;
+    color: #1a2845;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+  #screen-name input:focus { border-color: #ff8c42; background: #fff; }
+  #screen-name button {
+    padding: 14px 40px;
+    font-size: 1.15em;
+    background: #ff8c42;
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 700;
+    width: 100%;
+    transition: background 0.2s;
+    box-shadow: 0 4px 12px rgba(255, 140, 66, 0.3);
+  }
+  #screen-name button:hover:not(:disabled) { background: #ff7424; }
+  #screen-name button:disabled { background: #c9d1da; box-shadow: none; cursor: wait; color: #fff; }
+  #loading-status {
+    margin-top: 20px;
+    color: #5a6a85;
+    font-size: 0.9em;
+    min-height: 20px;
+  }
+  #view-hs-btn.btn-link {
+    margin-top: 12px;
+    background: transparent;
+    color: #5a6a85;
+    border: 1px solid #d0d6e0;
+    box-shadow: none;
+    font-weight: 600;
+    padding: 10px;
+    width: 100%;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95em;
+    transition: all 0.15s;
+  }
+  #view-hs-btn.btn-link:hover { background: #f8fafc; color: #1a2845; border-color: #1a2845; }
+
+  /* ============ MODAL ============ */
+  .modal-overlay {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(26, 40, 69, 0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 2000;
+    padding: 20px;
+  }
+  .modal-content {
+    background: #ffffff;
+    padding: 30px;
+    border-radius: 14px;
+    max-width: 520px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25);
+  }
+  .modal-content h2 {
+    margin: 0 0 18px;
+    color: #ff8c42;
+    text-align: center;
+  }
+  .modal-content table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
+  }
+  .modal-content th, .modal-content td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e0e6ed;
+    text-align: left;
+  }
+  .modal-content th {
+    color: #5a6a85;
+    font-size: 0.82em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .modal-content .empty {
+    text-align: center;
+    color: #5a6a85;
+    padding: 30px 10px;
+    font-style: italic;
+  }
+  .modal-content button {
+    width: 100%;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-weight: 700;
+    font-size: 1em;
+    cursor: pointer;
+  }
+
+  /* ============ GAME SCREEN — PORTRAIT (PHONE) ============ */
+  #screen-game {
+    height: 100vh;
+    flex-direction: column;
+    background: #ffffff;
+    overflow: hidden;
+  }
+  /* Compact header — single row of pills + tiny menu/end buttons */
+  #header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 10px;
+    background: #ffffff;
+    border-bottom: 1px solid #d0d6e0;
+    flex-shrink: 0;
+    height: 50px;
+  }
+  .header-stats {
+    flex: 1;
+    display: flex;
+    gap: 5px;
+    justify-content: center;
+    overflow: hidden;
+  }
+  .stat-pill {
+    padding: 4px 9px;
+    background: #f1f5f9;
+    border-radius: 999px;
+    border: 1px solid #e0e6ed;
+    font-size: 0.78em;
+    color: #5a6a85;
+    white-space: nowrap;
+    line-height: 1.2;
+  }
+  .stat-pill strong { color: #1a2845; font-weight: 700; }
+  .stat-pill.score-stat strong { color: #ff8c42; }
+  .stat-pill.correct-stat strong { color: #4caf50; }
+  .stat-pill.mistakes-stat strong { color: #e57373; }
+  .header-btn {
+    padding: 6px 10px;
+    background: #fff;
+    color: #5a6a85;
+    border: 1px solid #d0d6e0;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.78em;
+    flex-shrink: 0;
+    transition: all 0.15s;
+  }
+  .header-btn:hover { background: #f1f5f9; color: #1a2845; }
+  .header-btn.end { color: #c53030; border-color: #fecaca; }
+  .header-btn.end:hover { background: #fef2f2; border-color: #c53030; }
+
+  /* Main area: vertical stack — map on top, bottom panel below */
+  #main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  /* ============ MAP — light blue water + dark grey land ============ */
+  #map {
+    flex: 1;
+    min-height: 200px;
+    background-color: #c8e4ee;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='30' viewBox='0 0 60 30'><path d='M0 15 Q15 8 30 15 T60 15' stroke='%2388b4cc' stroke-width='1' fill='none' opacity='0.55'/><path d='M0 24 Q15 17 30 24 T60 24' stroke='%2388b4cc' stroke-width='0.8' fill='none' opacity='0.35'/></svg>");
+    background-size: 60px 30px;
+  }
+  .leaflet-container {
+    background-color: #c8e4ee !important;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='30' viewBox='0 0 60 30'><path d='M0 15 Q15 8 30 15 T60 15' stroke='%2388b4cc' stroke-width='1' fill='none' opacity='0.55'/><path d='M0 24 Q15 17 30 24 T60 24' stroke='%2388b4cc' stroke-width='0.8' fill='none' opacity='0.35'/></svg>") !important;
+    background-size: 60px 30px !important;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .leaflet-control-zoom a {
+    background-color: #ffffff !important;
+    color: #1a2845 !important;
+    border-color: #d0d6e0 !important;
+  }
+  .leaflet-control-zoom a:hover { background-color: #f1f5f9 !important; }
+  .leaflet-control-attribution {
+    background: rgba(255, 255, 255, 0.85) !important;
+    color: #5a6a85 !important;
+  }
+  .leaflet-control-attribution a { color: #2d6cdf !important; }
+
+  /* Sea / ocean / bay labels — italic blue text with white halo so they read on water */
+  .sea-label {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    text-align: center;
+    padding: 0 !important;
+    pointer-events: none;
+    white-space: nowrap;
+    color: #2d4f6b;
+    font-style: italic;
+    font-weight: 500;
+    font-size: 6px;
+    text-shadow:
+      0 0 2px rgba(255,255,255,0.95),
+      0 0 4px rgba(255,255,255,0.85),
+      0 1px 2px rgba(255,255,255,0.9);
+  }
+  .sea-label.tier-ocean {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #1d3d5a;
+  }
+  .sea-label.tier-sea {
+    font-size: 7px;
+    font-weight: 600;
+    color: #284d6c;
+  }
+  .sea-label.tier-minor {
+    font-size: 6px;
+    color: #406280;
+  }
+  /* Hide leaflet's default tooltip arrow for these */
+  .sea-label:before, .sea-label:after { display: none !important; }
+  .leaflet-tooltip.sea-label { box-shadow: none; }
+
+  /* Zoom-aware label visibility — at low zoom, only show oceans (the big bodies);
+     more labels reveal as user zooms in. Stops the labels from cluttering the
+     world view when zoomed out. */
+  .leaflet-container.zoom-low .sea-label.tier-sea,
+  .leaflet-container.zoom-low .sea-label.tier-minor { display: none !important; }
+  .leaflet-container.zoom-mid .sea-label.tier-minor { display: none !important; }
+
+  /* Country tooltip (after guess reveal) */
+  .country-tooltip {
+    background: rgba(26, 40, 69, 0.92) !important;
+    border: 1px solid #ff8c42 !important;
+    color: #fff !important;
+    font-weight: 600;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.2) !important;
+  }
+  .country-tooltip:before { display: none !important; }
+
+  /* ============ BOTTOM PANEL (replaces side panel for portrait) ============ */
+  #bottom-panel {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    background: #ffffff;
+    border-top: 1px solid #d0d6e0;
+    padding: 10px 12px;
+    /* Strict cap so the fact card never forces a scrollbar on S26 Ultra (1040px tall) */
+    max-height: 70vh;
+    overflow: hidden;
+  }
+  /* Continue button leaps to the top of the panel during the result phase */
+  #continue-btn-container { order: -1; }
+  #continue-btn-container:empty { display: none; } /* don't reserve space when no button */
+  #prompt {
+    padding: 10px 12px;
+    background: #f8fafc;
+    border: 1px solid #d0d6e0;
+    border-radius: 8px;
+    margin-bottom: 10px;
+    line-height: 1.35;
+    color: #1a2845;
+    font-size: 0.88em;
+  }
+  #options-title {
+    margin: 0 0 8px;
+    color: #ff8c42;
+    font-size: 0.92em;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  /* Options arranged 2-column × 3-row grid for vertical efficiency */
+  #options {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 7px;
+  }
+  #options button {
+    padding: 10px 8px;
+    background: #ffffff;
+    color: #1a2845;
+    border: 2px solid #d0d6e0;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.82em;
+    text-align: center;
+    transition: all 0.15s;
+    font-weight: 600;
+    line-height: 1.2;
+    min-height: 46px;
+    white-space: normal;
+    word-break: break-word;
+  }
+  #options button:hover:not(:disabled) {
+    background: #fff7f0;
+    border-color: #ff8c42;
+  }
+  #options button:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+  #options button.correct {
+    background: #e8f5e9;
+    border-color: #4caf50;
+    color: #2e7d32;
+  }
+  #options button.wrong {
+    background: #ffebee;
+    border-color: #e57373;
+    color: #c62828;
+  }
+
+  /* ============ COUNTDOWN TIMER ============ */
+  #timer-container {
+    margin-bottom: 14px;
+    padding: 10px 14px;
+    background: #f8fafc;
+    border: 1px solid #d0d6e0;
+    border-radius: 8px;
+    display: none; /* shown only while options are active */
+  }
+  .timer-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 0.85em;
+    color: #5a6a85;
+    margin-bottom: 6px;
+  }
+  #timer-display {
+    font-weight: 700;
+    font-size: 1.4em;
+    font-variant-numeric: tabular-nums;
+    transition: color 0.15s;
+  }
+  .timer-bar-bg {
+    height: 6px;
+    background: #e0e6ed;
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  #timer-bar-fill {
+    height: 100%;
+    width: 100%;
+    background: #4caf50;
+    border-radius: 3px;
+    transition: width 0.1s linear, background 0.2s;
+  }
+
+  /* ============ FACT CARD — compact, 2-column, no-scroll ============ */
+  #fact-card-container { margin-top: 8px; }
+  .fact-card {
+    padding: 8px 10px;
+    background: #f8fafc;
+    border: 1px solid #d0d6e0;
+    border-radius: 8px;
+  }
+  .fact-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-bottom: 6px;
+    margin-bottom: 7px;
+    border-bottom: 1px solid #e0e6ed;
+  }
+  .fact-flag { font-size: 1.5em; line-height: 1; flex-shrink: 0; }
+  .fact-names { line-height: 1.18; min-width: 0; flex: 1; }
+  .fact-name-common {
+    font-weight: 700;
+    font-size: 0.96em;
+    color: #1a2845;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fact-name-official {
+    font-style: italic;
+    font-size: 0.72em;
+    color: #5a6a85;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 5px 10px;
+    margin-bottom: 7px;
+  }
+  .fact-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+  .fact-icon { font-size: 0.95em; flex-shrink: 0; }
+  .fact-text { min-width: 0; line-height: 1.18; }
+  .fact-label {
+    font-size: 0.68em;
+    color: #5a6a85;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    font-weight: 600;
+  }
+  .fact-value {
+    font-size: 0.84em;
+    font-weight: 600;
+    color: #1a2845;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .fact-trivia {
+    padding-top: 6px;
+    border-top: 1px solid #e0e6ed;
+  }
+  .fact-trivia-header {
+    font-size: 0.74em;
+    font-weight: 700;
+    color: #ff8c42;
+    margin-bottom: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .fact-trivia ul {
+    margin: 0;
+    padding-left: 14px;
+    font-size: 0.78em;
+    color: #1a2845;
+    line-height: 1.35;
+  }
+  .fact-trivia li { margin-bottom: 1px; }
+  .fact-card.unavailable {
+    text-align: center;
+    color: #5a6a85;
+    font-size: 0.84em;
+    padding: 14px 10px;
+  }
+
+  /* Result banner — replaces the regular prompt look on result */
+  #prompt.result-correct {
+    background: #e8f5e9;
+    border-color: #4caf50;
+  }
+  #prompt.result-wrong {
+    background: #ffebee;
+    border-color: #e57373;
+  }
+  #prompt.result-correct, #prompt.result-wrong {
+    font-size: 0.9em;
+    line-height: 1.4;
+    padding: 10px 12px;
+    min-height: 0;
+  }
+  .result-status {
+    font-weight: 700;
+    font-size: 1.05em;
+  }
+  .result-meta {
+    margin-top: 3px;
+    font-size: 0.85em;
+    color: #5a6a85;
+  }
+  .result-points {
+    margin-top: 3px;
+    font-weight: 700;
+  }
+  #continue-btn-container { margin: 0 0 10px 0; }
+  #continue-btn {
+    display: block;
+    width: 100%;
+    padding: 13px;
+    background: #ff8c42;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 1em;
+    box-shadow: 0 4px 12px rgba(255, 140, 66, 0.3);
+    transition: background 0.15s;
+  }
+  #continue-btn:hover { background: #ff7424; }
+
+  /* Header back-to-menu button */
+  #back-menu-btn {
+    padding: 8px 16px;
+    background: #fff;
+    color: #5a6a85;
+    border: 1px solid #d0d6e0;
+    border-radius: 6px;
+    cursor: pointer;
+    font-weight: 600;
+    margin-right: 8px;
+    transition: all 0.15s;
+  }
+  #back-menu-btn:hover { background: #f1f5f9; border-color: #1a2845; color: #1a2845; }
+  #header .actions { display: flex; align-items: center; }
+
+  .legend {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid #e0e6ed;
+    font-size: 0.7em;
+    color: #5a6a85;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: center;
+    line-height: 1.6;
+  }
+  .legend-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .legend-swatch {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    border: 1px solid rgba(0,0,0,0.1);
+  }
+
+  /* ============ END SCREEN ============ */
+  #screen-end {
+    justify-content: center;
+    align-items: center;
+    background: linear-gradient(135deg, #eef2f7 0%, #d6e2ed 100%);
+    padding: 20px;
+    overflow-y: auto;
+  }
+  #screen-end .card {
+    background: #ffffff;
+    padding: 40px;
+    border-radius: 16px;
+    box-shadow: 0 8px 30px rgba(26, 40, 69, 0.12);
+    max-width: 600px;
+    width: 100%;
+    text-align: center;
+  }
+  #screen-end h1 {
+    font-size: 2.4em;
+    margin: 0 0 8px;
+    color: #ff8c42;
+  }
+  #final-score-display {
+    font-size: 3em;
+    font-weight: 700;
+    color: #4caf50;
+    margin: 18px 0;
+  }
+  #high-scores {
+    background: #f8fafc;
+    padding: 20px;
+    border-radius: 10px;
+    margin: 24px 0;
+    border: 1px solid #d0d6e0;
+  }
+  #high-scores h2 {
+    margin: 0 0 14px;
+    color: #ff8c42;
+    font-size: 1.3em;
+  }
+  #high-scores table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.95em;
+  }
+  #high-scores th, #high-scores td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #e0e6ed;
+    text-align: left;
+  }
+  #high-scores th {
+    color: #5a6a85;
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  #high-scores tr.current { background: rgba(255, 140, 66, 0.12); }
+  #high-scores tr.current td { color: #ff8c42; font-weight: 600; }
+  .end-buttons {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+  .end-buttons button {
+    padding: 14px 30px;
+    font-size: 1.05em;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .btn-primary { background: #ff8c42; color: #ffffff; box-shadow: 0 4px 12px rgba(255,140,66,0.3); }
+  .btn-primary:hover { background: #ff7424; }
+  .btn-secondary { background: #f1f5f9; color: #1a2845; border: 1px solid #d0d6e0; }
+  .btn-secondary:hover { background: #e2e8f0; }
+
+  /* Loading overlay */
+  #map-loading {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: rgba(204, 224, 235, 0.95);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #1a2845;
+    font-size: 1.05em;
+    z-index: 1000;
+  }
+  .spinner {
+    width: 36px;
+    height: 36px;
+    border: 4px solid #d0e0eb;
+    border-top-color: #ff8c42;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-right: 14px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<!-- ============ NAME SCREEN ============ -->
+<div id="screen-name" class="screen active">
+  <div class="card">
+    <h1>🌍 World Country Quiz</h1>
+    <p>Click a country on the map and guess what it is. The further it is from Indonesia, the more points you score. Game ends after <strong>5 mistakes</strong>.</p>
+    <input type="text" id="name-input" placeholder="Enter your name" maxlength="20" autocomplete="off" />
+    <button id="start-btn" disabled>Loading map data…</button>
+    <button id="view-hs-btn" class="btn-link" onclick="showHighScoresModal()">🏅 View Leaderboard</button>
+    <div id="loading-status">⏳ Loading world map data…</div>
+  </div>
+</div>
+
+<!-- ============ HIGH SCORES MODAL ============ -->
+<div id="hs-modal" class="modal-overlay" style="display:none;" onclick="if(event.target===this)hideHighScoresModal()">
+  <div class="modal-content">
+    <h2>🏅 Leaderboard — Top 10</h2>
+    <div id="hs-modal-body"></div>
+    <button class="btn-primary" style="margin-top:18px;" onclick="hideHighScoresModal()">Close</button>
+  </div>
+</div>
+
+<!-- ============ GAME SCREEN — PORTRAIT (PHONE) ============ -->
+<div id="screen-game" class="screen">
+  <div id="header">
+    <button class="header-btn" onclick="backToMenu()" title="Main Menu">← Menu</button>
+    <div class="header-stats">
+      <span class="stat-pill score-stat">⭐&nbsp;<strong id="score-display">0</strong></span>
+      <span class="stat-pill correct-stat">✓&nbsp;<strong id="correct-display">0</strong></span>
+      <span class="stat-pill mistakes-stat">✗&nbsp;<strong id="mistakes-display">0</strong>/<strong id="max-mistakes">5</strong></span>
+    </div>
+    <button class="header-btn end" onclick="endGame()" title="End Game">End</button>
+    <span id="player-name-display" style="display:none;"></span>
+  </div>
+  <div id="main">
+    <div id="map"></div>
+    <div id="bottom-panel">
+      <div id="prompt">👆 Tap any country on the map. Sea names shown as clues. Pinch to zoom.</div>
+      <div id="timer-container">
+        <div class="timer-row">
+          <span>⏱️ Faster = more points (max 10s)</span>
+          <span><span id="timer-display">10.0</span>s</span>
+        </div>
+        <div class="timer-bar-bg"><div id="timer-bar-fill"></div></div>
+      </div>
+      <h3 id="options-title" style="display:none;">What country is this?</h3>
+      <div id="options"></div>
+      <div id="continue-btn-container"></div>
+      <div id="fact-card-container"></div>
+      <div class="legend">
+        <div class="legend-row"><div class="legend-swatch" style="background:#5e6873"></div>Available</div>
+        <div class="legend-row"><div class="legend-swatch" style="background:#ff8c42"></div>Selected</div>
+        <div class="legend-row"><div class="legend-swatch" style="background:#4caf50"></div>Correct</div>
+        <div class="legend-row"><div class="legend-swatch" style="background:#e57373"></div>Wrong</div>
+        <div class="legend-row"><div class="legend-swatch" style="background:#c8e4ee"></div>Water</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ END SCREEN ============ -->
+<div id="screen-end" class="screen">
+  <div class="card">
+    <h1>Game Over!</h1>
+    <p style="color:#5a6a85; margin:0;">Well played, <strong id="end-player-name"></strong>!</p>
+    <div id="final-score-display">0</div>
+    <p id="end-summary" style="color:#5a6a85; margin:0 0 20px;"></p>
+
+    <div id="high-scores">
+      <h2>🏅 Leaderboard — Top 10</h2>
+      <table>
+        <thead>
+          <tr><th>#</th><th>Player</th><th>Score</th><th>Date</th></tr>
+        </thead>
+        <tbody id="high-scores-body"></tbody>
+      </table>
+    </div>
+
+    <div class="end-buttons">
+      <button class="btn-primary" onclick="playAgain()">Play Again</button>
+      <button class="btn-secondary" onclick="changePlayer()">Change Player</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// CONFIGURATION
+// ============================================================
+const INDONESIA_COORDS = [-6.2088, 106.8456]; // Jakarta
+const MAX_MISTAKES = 5;
+
+// Natural Earth Admin 0 — Countries (CC0). 50m has ~246 countries incl. micro-states.
+// Source: https://www.naturalearthdata.com/
+const GEOJSON_URLS = [
+  'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_admin_0_countries.geojson',
+  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_admin_0_countries.geojson',
+  'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_admin_0_countries.geojson',
+  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson'
+];
+
+// Natural Earth Lakes (Caspian Sea, Aral Sea, Great Lakes, Lake Victoria, Lake Baikal, etc.)
+const LAKES_URLS = [
+  'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_lakes.geojson',
+  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_lakes.geojson'
+];
+
+// Natural Earth Marine Polygons — named oceans, seas, gulfs, bays
+const MARINE_URLS = [
+  'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_50m_geography_marine_polys.geojson',
+  'https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_50m_geography_marine_polys.geojson',
+  'https://cdn.jsdelivr.net/gh/nvkelso/natural-earth-vector@master/geojson/ne_110m_geography_marine_polys.geojson'
+];
+
+// REST Countries API — open public dataset (CIA World Factbook + Wikipedia origin)
+// Used for the country fact card: capital, population, area, languages, currency, borders, etc.
+// https://restcountries.com/
+const FACTS_FIELDS = 'name,cca3,capital,population,area,languages,currencies,region,subregion,flag,borders,timezones,unMember';
+const FACTS_URLS = [
+  `https://restcountries.com/v3.1/all?fields=${FACTS_FIELDS}`,
+  `https://restcountries.com/v3.1/independent?status=true&fields=${FACTS_FIELDS}`
+];
+
+// ============================================================
+// STATE
+// ============================================================
+let map;
+let geoLayer;
+let countryLayers = {};
+let countryFeatures = {};
+let countryCentroids = {};
+let countryStates = {};   // 'grey' | 'orange' | 'red' | 'green'
+let allCountryNames = [];
+let sovereignCount = 0;   // sovereign UN-member-style countries (NE TYPE = "Sovereign country" or "Country")
+let territoryCount = 0;   // dependencies, disputed regions, indeterminate
+let countryFacts = {};    // ISO_A3 -> REST Countries data object
+let factsLoaded = false;
+let optionStartTime = null; // ms timestamp when the 6 options appeared
+let timerInterval = null;
+const TIME_LIMIT_SEC = 10;  // > this = 0 points even if correct
+let currentSelection = null;
+let playerName = '';
+let score = 0;
+let correctCount = 0;
+let mistakes = 0;
+let canSelect = true;
+let geoDataLoaded = false;
+
+// ============================================================
+// HELPERS
+// ============================================================
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+// Haversine distance in km
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6371;
+  const toRad = x => x * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+// True centroid via Turf.js. For multi-polygon countries (Russia, USA, Indonesia),
+// uses the largest sub-polygon's centroid so antimeridian-wrapping doesn't put
+// the centroid in the wrong ocean.
+function computeCentroid(feature) {
+  try {
+    if (feature.geometry.type === 'MultiPolygon') {
+      let maxArea = -1;
+      let maxPoly = null;
+      for (const coords of feature.geometry.coordinates) {
+        const poly = turf.polygon(coords);
+        const area = turf.area(poly);
+        if (area > maxArea) { maxArea = area; maxPoly = poly; }
+      }
+      if (maxPoly) {
+        const c = turf.centroid(maxPoly);
+        return [c.geometry.coordinates[1], c.geometry.coordinates[0]];
+      }
+    }
+    const c = turf.centroid(feature);
+    return [c.geometry.coordinates[1], c.geometry.coordinates[0]];
+  } catch (e) {
+    const layer = L.geoJSON(feature);
+    const center = layer.getBounds().getCenter();
+    return [center.lat, center.lng];
+  }
+}
+
+function getStyle(state) {
+  switch (state) {
+    case 'orange': return { fillColor: '#ff8c42', color: '#ffffff', weight: 1.5, fillOpacity: 1.0 };
+    case 'red':    return { fillColor: '#e57373', color: '#ffffff', weight: 1, fillOpacity: 1.0 };
+    case 'green':  return { fillColor: '#4caf50', color: '#ffffff', weight: 1, fillOpacity: 1.0 };
+    // Land default — dark grey, strong lightness contrast with light-blue water.
+    default:       return { fillColor: '#5e6873', color: '#ffffff', weight: 0.6, fillOpacity: 1.0 };
+  }
+}
+
+// Lake style — matches map water color so lakes look like the surrounding sea.
+const LAKE_STYLE = {
+  fillColor: '#c8e4ee',
+  color: '#88b4cc',
+  weight: 0.5,
+  fillOpacity: 1.0
+};
+
+function setCountryState(name, state) {
+  countryStates[name] = state;
+  if (countryLayers[name]) countryLayers[name].setStyle(getStyle(state));
+}
+
+// ============================================================
+// MAP INITIALIZATION
+// ============================================================
+async function fetchFirstAvailable(urls) {
+  for (const url of urls) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      return await res.json();
+    } catch (e) { /* try next */ }
+  }
+  return null;
+}
+
+async function initMap() {
+  map = L.map('map', {
+    minZoom: 1,
+    maxZoom: 7,
+    zoomSnap: 0.25, // allow fractional zoom so fitBounds picks the perfect level
+    worldCopyJump: false,
+    maxBounds: [[-85, -180], [85, 180]],
+    maxBoundsViscosity: 1.0,
+    zoomControl: true,
+    attributionControl: true
+  });
+  // Fit the whole world to the (narrow) portrait viewport
+  map.fitBounds([[-58, -180], [82, 180]], { animate: false });
+
+  const loadingDiv = document.createElement('div');
+  loadingDiv.id = 'map-loading';
+  loadingDiv.innerHTML = '<div class="spinner"></div> Loading country boundaries…';
+  document.getElementById('map').appendChild(loadingDiv);
+
+  // === Countries (required) ===
+  const countryData = await fetchFirstAvailable(GEOJSON_URLS);
+  if (!countryData) {
+    loadingDiv.innerHTML = '❌ Could not load country data. Please check your internet connection and reload.';
+    throw new Error('Countries dataset unavailable');
+  }
+
+  geoLayer = L.geoJSON(countryData, {
+    style: () => getStyle('grey'),
+    onEachFeature: (feature, layer) => {
+      const props = feature.properties;
+      const name = props.ADMIN || props.NAME_LONG || props.NAME || props.name || 'Unknown';
+
+      if (name === 'Antarctica') {
+        layer.setStyle({ fillColor: '#a8b0b8', fillOpacity: 0.85, color: '#fff', weight: 0.5 });
+        return;
+      }
+
+      countryLayers[name] = layer;
+      countryFeatures[name] = feature;
+      countryCentroids[name] = computeCentroid(feature);
+      countryStates[name] = 'grey';
+      allCountryNames.push(name);
+
+      // Bucket the entry as a sovereign country vs. territory/dependency for the load message
+      const neType = (props.TYPE || '').toString();
+      if (neType === 'Sovereign country' || neType === 'Country') sovereignCount++;
+      else territoryCount++;
+
+      layer.on('click', () => handleCountryClick(name));
+      layer.on('mouseover', () => {
+        const state = countryStates[name];
+        if (state === 'grey' && canSelect && !currentSelection) {
+          layer.setStyle({ weight: 2, fillColor: '#7a8590' }); // lighter dark grey on hover
+        }
+      });
+      layer.on('mouseout', () => {
+        if (countryStates[name] === 'grey') layer.setStyle(getStyle('grey'));
+      });
+    }
+  }).addTo(map);
+
+  // === Lakes (best-effort polish — Caspian, Aral, Lake Victoria, Great Lakes, Baikal, etc.) ===
+  loadingDiv.innerHTML = '<div class="spinner"></div> Loading lakes…';
+  const lakesData = await fetchFirstAvailable(LAKES_URLS);
+  if (lakesData) {
+    L.geoJSON(lakesData, {
+      style: () => LAKE_STYLE,
+      interactive: false
+    }).addTo(map);
+  }
+
+  // === Marine labels (best-effort — names of oceans, seas, gulfs, bays) ===
+  loadingDiv.innerHTML = '<div class="spinner"></div> Loading sea labels…';
+  const marineData = await fetchFirstAvailable(MARINE_URLS);
+  if (marineData) addMarineLabels(marineData);
+
+  // Hide minor labels when zoomed out so labels don't dominate the map at low zoom
+  const updateLabelVisibility = () => {
+    const z = map.getZoom();
+    const c = map.getContainer();
+    c.classList.remove('zoom-low', 'zoom-mid', 'zoom-high');
+    if (z <= 2)      c.classList.add('zoom-low');   // only oceans
+    else if (z <= 4) c.classList.add('zoom-mid');   // oceans + seas
+    else             c.classList.add('zoom-high');  // all
+  };
+  map.on('zoomend', updateLabelVisibility);
+  updateLabelVisibility();
+
+  // Kick off REST Countries fact-loading in the background. Game becomes playable
+  // immediately; fact cards will start working once this resolves.
+  loadCountryFacts();
+
+  loadingDiv.remove();
+  geoDataLoaded = true;
+
+  const startBtn = document.getElementById('start-btn');
+  startBtn.disabled = false;
+  startBtn.textContent = 'Start Game';
+  document.getElementById('loading-status').textContent =
+    `✅ Loaded ${sovereignCount} countries + ${territoryCount} territories — ready to play!`;
+}
+
+// Add italic, halo'd labels for oceans / seas / gulfs / bays.
+// Tier sizing by featurecla so oceans stand out and minor bodies stay quiet.
+function addMarineLabels(marineData) {
+  const seen = new Set();
+  marineData.features.forEach(feature => {
+    const props = feature.properties || {};
+    const name = props.name || props.name_en || props.NAME;
+    if (!name) return;
+    const fc = String(props.featurecla || '').toLowerCase();
+
+    // Filter: only label oceans, seas, gulfs, bays — skip channels/straits/sounds for clarity
+    let tier;
+    if (fc.includes('ocean')) tier = 'tier-ocean';
+    else if (fc.includes('sea')) tier = 'tier-sea';
+    else if (fc.includes('gulf') || fc.includes('bay')) tier = 'tier-minor';
+    else return;
+
+    // De-dup (some files have multi-polygon entries with the same name)
+    const key = name + '|' + tier;
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    // Use pointOnFeature instead of centroid — centroids of concave shapes (Black
+    // Sea, Adriatic, Aegean…) can fall on adjacent land. pointOnFeature is
+    // guaranteed to return a point INSIDE the polygon.
+    let labelCoords;
+    try {
+      let target = feature;
+      // For multi-polygon water bodies, label the largest sub-polygon
+      if (feature.geometry.type === 'MultiPolygon') {
+        let maxArea = -1, maxPoly = null;
+        for (const coords of feature.geometry.coordinates) {
+          const p = turf.polygon(coords);
+          const a = turf.area(p);
+          if (a > maxArea) { maxArea = a; maxPoly = p; }
+        }
+        if (!maxPoly) return;
+        target = maxPoly;
+      } else if (feature.geometry.type !== 'Polygon') {
+        return;
+      }
+      const pt = turf.pointOnFeature(target);
+      labelCoords = [pt.geometry.coordinates[1], pt.geometry.coordinates[0]];
+    } catch (e) { return; }
+
+    // Place an invisible marker and bind a permanent center-direction tooltip.
+    const marker = L.marker(labelCoords, {
+      opacity: 0,
+      interactive: false,
+      keyboard: false
+    });
+    marker.bindTooltip(name, {
+      permanent: true,
+      direction: 'center',
+      className: 'sea-label ' + tier
+    });
+    marker.addTo(map);
+  });
+}
+
+// ============================================================
+// COUNTDOWN TIMER (for option-picking)
+// ============================================================
+function startCountdown() {
+  optionStartTime = Date.now();
+  const container = document.getElementById('timer-container');
+  const display = document.getElementById('timer-display');
+  const fill = document.getElementById('timer-bar-fill');
+  container.style.display = 'block';
+
+  function tick() {
+    const elapsed = (Date.now() - optionStartTime) / 1000;
+    const remaining = Math.max(0, TIME_LIMIT_SEC - elapsed);
+    display.textContent = remaining.toFixed(1);
+
+    const pct = (remaining / TIME_LIMIT_SEC) * 100;
+    fill.style.width = pct + '%';
+
+    let color;
+    if (remaining > 6)      color = '#4caf50';    // green
+    else if (remaining > 3) color = '#ff8c42';    // orange
+    else                    color = '#e57373';    // red
+    fill.style.background = color;
+    display.style.color = color;
+
+    if (remaining <= 0 && timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+    }
+  }
+  tick();
+  timerInterval = setInterval(tick, 100);
+}
+
+function stopCountdown() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  const elapsed = optionStartTime ? (Date.now() - optionStartTime) / 1000 : TIME_LIMIT_SEC + 1;
+  optionStartTime = null;
+  return elapsed;
+}
+
+function clearCountdown() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+  optionStartTime = null;
+  const container = document.getElementById('timer-container');
+  if (container) container.style.display = 'none';
+  const fill = document.getElementById('timer-bar-fill');
+  if (fill) fill.style.width = '100%';
+}
+
+// ============================================================
+// COUNTRY FACTS (REST Countries API)
+// ============================================================
+async function loadCountryFacts() {
+  for (const url of FACTS_URLS) {
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const data = await res.json();
+      data.forEach(c => { if (c.cca3) countryFacts[c.cca3] = c; });
+      factsLoaded = true;
+      buildTriviaIndices(); // pre-compute world rankings used by "Did you know?"
+      console.log(`Loaded facts for ${Object.keys(countryFacts).length} countries`);
+      return;
+    } catch (e) { /* try next url */ }
+  }
+  console.warn('Failed to load country facts — fact cards will be unavailable');
+}
+
+// World-ranking indices used to spot fun trivia (top-10 by population, top-10 by area, etc.)
+let popRankByCca3 = {};
+let areaRankByCca3 = {};
+function buildTriviaIndices() {
+  const list = Object.values(countryFacts);
+  list.slice().sort((a, b) => (b.population || 0) - (a.population || 0))
+    .forEach((c, i) => { popRankByCca3[c.cca3] = i + 1; });
+  list.slice().sort((a, b) => (b.area || 0) - (a.area || 0))
+    .forEach((c, i) => { areaRankByCca3[c.cca3] = i + 1; });
+}
+
+// Generate "Did you know?" trivia bullets from REST Countries data + computed rankings.
+function computeTrivia(facts, distanceKm) {
+  const trivia = [];
+  const popRank = popRankByCca3[facts.cca3];
+  const areaRank = areaRankByCca3[facts.cca3];
+
+  if (popRank && popRank <= 10) trivia.push(`🏆 #${popRank} most populous country in the world.`);
+  else if (popRank && popRank <= 25) trivia.push(`👥 Among the top 25 most populous countries (#${popRank}).`);
+
+  if (areaRank && areaRank <= 10) trivia.push(`🌍 #${areaRank} largest country in the world by area.`);
+  else if (areaRank && areaRank <= 25) trivia.push(`🗺️ Among the top 25 largest by area (#${areaRank}).`);
+
+  if (facts.borders && facts.borders.length === 0) {
+    trivia.push('🏝️ Island nation — no land borders with any other country.');
+  } else if (facts.borders && facts.borders.length >= 8) {
+    trivia.push(`🤝 Borders many neighbors (${facts.borders.length} countries).`);
+  }
+
+  const langCount = facts.languages ? Object.keys(facts.languages).length : 0;
+  if (langCount >= 4) trivia.push(`🗣️ Multilingual — ${langCount} official languages.`);
+
+  if (facts.timezones && facts.timezones.length >= 5) {
+    trivia.push(`🕐 Spans ${facts.timezones.length} time zones.`);
+  }
+
+  if (facts.area && facts.area < 1000) {
+    trivia.push(`📏 Microstate — smaller than 1,000 km² (${Math.round(facts.area).toLocaleString()} km²).`);
+  }
+
+  // Distance contextualization: how many times farther than Singapore (a familiar SE Asia reference)
+  if (distanceKm) {
+    const SINGAPORE_FROM_JAKARTA_KM = 880;
+    const ratio = distanceKm / SINGAPORE_FROM_JAKARTA_KM;
+    if (ratio >= 5) {
+      trivia.push(`✈️ About ${ratio.toFixed(1)}× farther from Indonesia than Singapore is.`);
+    }
+  }
+
+  if (facts.unMember === false) trivia.push('🏛️ Not a UN member state.');
+
+  return trivia;
+}
+
+// Map a Natural Earth feature to a REST Countries entry via ISO 3-letter code.
+// NE has ISO_A3, ISO_A3_EH, ADM0_A3, SOV_A3 — use them in order, skipping "-99" sentinels.
+function lookupFacts(feature) {
+  if (!feature) return null;
+  const p = feature.properties || {};
+  const candidates = [p.ISO_A3_EH, p.ADM0_A3, p.ISO_A3, p.SOV_A3];
+  for (const code of candidates) {
+    if (code && code !== '-99' && countryFacts[code]) return countryFacts[code];
+  }
+  return null;
+}
+
+// Human-readable big numbers: 331,002,651 → "331M", 9,833,517 → "9.8M"
+function humanize(n) {
+  if (n == null || isNaN(n)) return '—';
+  if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, '') + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'K';
+  return n.toLocaleString();
+}
+
+function renderFactCard(name, distanceKm) {
+  const feature = countryFeatures[name];
+  const facts = lookupFacts(feature);
+
+  if (!facts) {
+    if (!factsLoaded) {
+      return '<div class="fact-card unavailable">⏳ Loading country facts…</div>';
+    }
+    return '<div class="fact-card unavailable">📋 Detailed facts not available for this entry.</div>';
+  }
+
+  const capital   = (facts.capital && facts.capital.length) ? facts.capital[0] : '—';
+  const pop       = humanize(facts.population);
+  const area      = facts.area ? humanize(facts.area) + ' km²' : '—';
+  const region    = facts.subregion || facts.region || '—';
+  const langs     = facts.languages ? Object.values(facts.languages).slice(0, 2).join(', ') : '—';
+  const currs     = facts.currencies
+    ? Object.values(facts.currencies).map(c => c.symbol ? `${c.name.split(' ')[0]} ${c.symbol}` : c.name).slice(0, 1).join('')
+    : '—';
+  const flag      = facts.flag || '🏳️';
+  const commonName = (facts.name && facts.name.common) || name;
+  const officialName = (facts.name && facts.name.official) || '';
+  const showOfficial = officialName && officialName !== commonName;
+
+  // Trivia — keep to top 3 to fit without scroll
+  const trivia = computeTrivia(facts, distanceKm).slice(0, 3);
+  const triviaHtml = trivia.length
+    ? `<div class="fact-trivia">
+         <div class="fact-trivia-header">💡 Did you know?</div>
+         <ul>${trivia.map(t => `<li>${t}</li>`).join('')}</ul>
+       </div>`
+    : '';
+
+  const cell = (icon, label, value) => `
+    <div class="fact-item">
+      <div class="fact-icon">${icon}</div>
+      <div class="fact-text">
+        <div class="fact-label">${label}</div>
+        <div class="fact-value" title="${escapeHtml(value)}">${escapeHtml(value)}</div>
+      </div>
+    </div>`;
+
+  return `
+    <div class="fact-card">
+      <div class="fact-header">
+        <span class="fact-flag">${flag}</span>
+        <div class="fact-names">
+          <div class="fact-name-common">${escapeHtml(commonName)}</div>
+          ${showOfficial ? `<div class="fact-name-official">${escapeHtml(officialName)}</div>` : ''}
+        </div>
+      </div>
+      <div class="fact-grid">
+        ${cell('🏛️', 'Capital', capital)}
+        ${cell('👥', 'Population', pop)}
+        ${cell('🗺️', 'Area', area)}
+        ${cell('🌐', 'Region', region)}
+        ${cell('🗣️', 'Language', langs)}
+        ${cell('💰', 'Currency', currs)}
+      </div>
+      ${triviaHtml}
+    </div>
+  `;
+}
+
+// ============================================================
+// GAME LOGIC
+// ============================================================
+function startGame() {
+  const nameInput = document.getElementById('name-input');
+  const v = nameInput.value.trim();
+  if (!v) { alert('Please enter your name first!'); nameInput.focus(); return; }
+  if (!geoDataLoaded) { alert('Map data still loading, please wait a moment…'); return; }
+
+  playerName = v;
+  document.getElementById('player-name-display').textContent = playerName;
+  document.getElementById('max-mistakes').textContent = MAX_MISTAKES;
+
+  // Reset all state
+  for (const name of allCountryNames) {
+    setCountryState(name, 'grey');
+    if (countryLayers[name]) countryLayers[name].unbindTooltip();
+  }
+  score = 0;
+  correctCount = 0;
+  mistakes = 0;
+  currentSelection = null;
+  canSelect = true;
+
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('options').style.display = '';
+  document.getElementById('options-title').style.display = 'none';
+  document.querySelector('.legend').style.display = '';
+  document.getElementById('continue-btn-container').innerHTML = '';
+  document.getElementById('fact-card-container').innerHTML = '';
+  clearCountdown();
+  document.getElementById('prompt').classList.remove('result-correct', 'result-wrong');
+  document.getElementById('prompt').innerHTML =
+    '👆 Tap any country on the map. Sea names shown as clues. Pinch to zoom.';
+
+  updateDisplay();
+  showScreen('screen-game');
+  setTimeout(() => {
+    map.invalidateSize();
+    map.fitBounds([[-58, -180], [82, 180]], { animate: false });
+  }, 100);
+}
+
+function updateDisplay() {
+  document.getElementById('score-display').textContent = score.toLocaleString();
+  document.getElementById('correct-display').textContent = correctCount;
+  document.getElementById('mistakes-display').textContent = mistakes;
+}
+
+function handleCountryClick(name) {
+  if (!canSelect) return;
+  if (countryStates[name] !== 'grey') return; // can't reselect red/green
+  if (currentSelection !== null) return;
+
+  currentSelection = name;
+  setCountryState(name, 'orange');
+  showOptions(name);
+}
+
+function showOptions(correctName) {
+  const distractors = [];
+  const candidatePool = allCountryNames.filter(n => n !== correctName);
+  const shuffled = [...candidatePool].sort(() => Math.random() - 0.5);
+  for (const c of shuffled) {
+    if (distractors.length >= 5) break;
+    distractors.push(c);
+  }
+
+  const options = [correctName, ...distractors];
+  for (let i = options.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [options[i], options[j]] = [options[j], options[i]];
+  }
+
+  const optionsDiv = document.getElementById('options');
+  optionsDiv.innerHTML = '';
+  document.getElementById('options-title').style.display = 'block';
+  document.getElementById('prompt').innerHTML =
+    '🎯 The <strong style="color:#ff8c42;">orange</strong> country is highlighted on the map. Which country is it?';
+
+  options.forEach(opt => {
+    const btn = document.createElement('button');
+    btn.textContent = opt;
+    btn.onclick = () => handleOptionClick(opt, correctName, btn);
+    optionsDiv.appendChild(btn);
+  });
+
+  // Kick off the speed-bonus countdown
+  startCountdown();
+}
+
+function handleOptionClick(chosen, correct, clickedBtn) {
+  document.querySelectorAll('#options button').forEach(b => b.disabled = true);
+
+  // Stop the countdown and capture how long the player took
+  const elapsed = stopCountdown();
+  document.getElementById('timer-container').style.display = 'none';
+
+  const centroid = countryCentroids[correct];
+  const dist = haversine(INDONESIA_COORDS[0], INDONESIA_COORDS[1], centroid[0], centroid[1]);
+  const distancePoints = Math.max(1, Math.round(dist / 100));
+
+  // Speed multiplier: 1.0 at instant answer, 0.0 at exactly 10s, 0 if over.
+  let speedMult = 0;
+  let points = 0;
+  if (chosen === correct) {
+    if (elapsed <= TIME_LIMIT_SEC) {
+      speedMult = (TIME_LIMIT_SEC - elapsed) / TIME_LIMIT_SEC;
+      points = Math.round(distancePoints * speedMult);
+    } // else: too slow, points stay 0
+  }
+
+  const elapsedDisp = elapsed.toFixed(1);
+
+  const promptEl = document.getElementById('prompt');
+  promptEl.classList.remove('result-correct', 'result-wrong');
+
+  if (chosen === correct) {
+    setCountryState(correct, 'green');
+    score += points;
+    correctCount++;
+    clickedBtn.classList.add('correct');
+    promptEl.classList.add('result-correct');
+    if (points > 0) {
+      promptEl.innerHTML =
+        `<div class="result-status" style="color:#2e7d32;">✅ Correct!</div>` +
+        `<div class="result-meta">📏 ${Math.round(dist).toLocaleString()} km · ⏱️ ${elapsedDisp}s · Speed ${(speedMult * 100).toFixed(0)}%</div>` +
+        `<div class="result-points" style="color:#ff8c42;">+${points} points</div>`;
+    } else {
+      promptEl.innerHTML =
+        `<div class="result-status" style="color:#2e7d32;">✅ Correct, but too slow</div>` +
+        `<div class="result-meta">⏱️ ${elapsedDisp}s (over ${TIME_LIMIT_SEC}s limit)</div>` +
+        `<div class="result-points" style="color:#5a6a85;">+0 points</div>`;
+    }
+  } else {
+    setCountryState(correct, 'red');
+    mistakes++;
+    clickedBtn.classList.add('wrong');
+    document.querySelectorAll('#options button').forEach(b => {
+      if (b.textContent === correct) b.classList.add('correct');
+    });
+    promptEl.classList.add('result-wrong');
+    const remaining = MAX_MISTAKES - mistakes;
+    promptEl.innerHTML =
+      `<div class="result-status" style="color:#c62828;">❌ Wrong! It was ${escapeHtml(correct)}</div>` +
+      `<div class="result-meta">📏 ${Math.round(dist).toLocaleString()} km · ⏱️ ${elapsedDisp}s</div>` +
+      `<div class="result-points" style="color:#5a6a85;">Mistakes left: ${remaining}</div>`;
+  }
+
+  // Tooltip on the country (for learning)
+  if (countryLayers[correct]) {
+    countryLayers[correct].bindTooltip(correct, {
+      sticky: true,
+      direction: 'top',
+      className: 'country-tooltip'
+    });
+  }
+
+  updateDisplay();
+
+  // Hide options + title during the result phase so the fact card has full space
+  // (and never pushes the panel into a scrollable overflow).
+  document.getElementById('options').style.display = 'none';
+  document.getElementById('options-title').style.display = 'none';
+  document.querySelector('.legend').style.display = 'none';
+
+  // Continue button is rendered into its own slot which has CSS order:-1, so it
+  // lands at the very top of the panel — above the result banner and fact card.
+  const continueContainer = document.getElementById('continue-btn-container');
+  continueContainer.innerHTML = '';
+  continueContainer.appendChild(buildContinueButton(correct));
+
+  // Fact card lives below the result banner
+  const factContainer = document.getElementById('fact-card-container');
+  factContainer.innerHTML = renderFactCard(correct, dist);
+
+  // Bottom panel grew → tell the map to recompute its size so it fills correctly
+  setTimeout(() => map.invalidateSize(), 50);
+
+  // If facts were still loading, refresh the card once they finish (Continue stays put)
+  if (!factsLoaded) {
+    const interval = setInterval(() => {
+      if (factsLoaded) {
+        clearInterval(interval);
+        if (document.getElementById('continue-btn')) {
+          factContainer.innerHTML = renderFactCard(correct, dist);
+        }
+      }
+    }, 500);
+    setTimeout(() => clearInterval(interval), 10000);
+  }
+}
+
+function buildContinueButton(correct) {
+  const btn = document.createElement('button');
+  btn.id = 'continue-btn';
+  btn.textContent = mistakes >= MAX_MISTAKES ? 'See Results →' : 'Continue →';
+  btn.onclick = () => {
+    if (mistakes >= MAX_MISTAKES) endGame();
+    else advanceRound();
+  };
+  return btn;
+}
+
+function advanceRound() {
+  currentSelection = null;
+  canSelect = true;
+  clearCountdown();
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('options').style.display = ''; // back to grid (CSS default)
+  document.getElementById('options-title').style.display = 'none';
+  document.querySelector('.legend').style.display = '';   // restore visibility
+  document.getElementById('continue-btn-container').innerHTML = '';
+  document.getElementById('fact-card-container').innerHTML = '';
+  const promptEl = document.getElementById('prompt');
+  promptEl.classList.remove('result-correct', 'result-wrong');
+  // Bottom panel shrank back → recompute map size
+  setTimeout(() => map.invalidateSize(), 50);
+
+  // Edge case: every country has been guessed (very unlikely with 246 countries, but handle it)
+  const remainingGrey = allCountryNames.some(n => countryStates[n] === 'grey');
+  if (!remainingGrey) {
+    endGame();
+    return;
+  }
+
+  document.getElementById('prompt').innerHTML =
+    '👆 Click another <strong style="color:#5a6a85;">grey</strong> country on the map. (Red and green ones can\'t be selected again.)';
+}
+
+function endGame() {
+  document.getElementById('end-player-name').textContent = playerName;
+  document.getElementById('final-score-display').textContent = score.toLocaleString();
+  const totalGuesses = correctCount + mistakes;
+  document.getElementById('end-summary').textContent =
+    `${correctCount} correct, ${mistakes} wrong (${totalGuesses} total guesses)`;
+
+  saveHighScore();
+  renderHighScores();
+  showScreen('screen-end');
+}
+
+// ============================================================
+// HIGH SCORES
+// ============================================================
+function saveHighScore() {
+  const scores = JSON.parse(localStorage.getItem('worldQuizScores') || '[]');
+  const entry = {
+    name: playerName,
+    score,
+    correct: correctCount,
+    mistakes: mistakes,
+    date: new Date().toISOString().slice(0, 10),
+    timestamp: Date.now()
+  };
+  scores.push(entry);
+  scores.sort((a, b) => b.score - a.score);
+  localStorage.setItem('worldQuizScores', JSON.stringify(scores.slice(0, 50)));
+  window._currentEntryTimestamp = entry.timestamp;
+}
+
+function renderHighScores() {
+  const scores = JSON.parse(localStorage.getItem('worldQuizScores') || '[]');
+  const tbody = document.getElementById('high-scores-body');
+  if (scores.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#5a6a85;">No scores yet</td></tr>';
+    return;
+  }
+  tbody.innerHTML = scores.slice(0, 10).map((s, i) => {
+    const isCurrent = s.timestamp === window._currentEntryTimestamp;
+    return `<tr class="${isCurrent ? 'current' : ''}">
+      <td>${i + 1}</td>
+      <td>${escapeHtml(s.name)}</td>
+      <td><strong>${s.score.toLocaleString()}</strong></td>
+      <td>${s.date}</td>
+    </tr>`;
+  }).join('');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>'"]/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+  }[c]));
+}
+
+function playAgain() { startGame(); }
+
+function showHighScoresModal() {
+  const scores = JSON.parse(localStorage.getItem('worldQuizScores') || '[]');
+  const body = document.getElementById('hs-modal-body');
+  if (scores.length === 0) {
+    body.innerHTML = '<div class="empty">No scores yet — play a game to set the first one!</div>';
+  } else {
+    const rows = scores.slice(0, 10).map((s, i) =>
+      `<tr>
+        <td>${i + 1}</td>
+        <td>${escapeHtml(s.name)}</td>
+        <td><strong style="color:#ff8c42;">${s.score.toLocaleString()}</strong></td>
+        <td style="color:#5a6a85;">${s.date}</td>
+      </tr>`).join('');
+    body.innerHTML = `
+      <table>
+        <thead><tr><th>#</th><th>Player</th><th>Score</th><th>Date</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }
+  document.getElementById('hs-modal').style.display = 'flex';
+}
+
+function hideHighScoresModal() {
+  document.getElementById('hs-modal').style.display = 'none';
+}
+
+function backToMenu() {
+  // Confirm only if a game is in progress (player has actually played a round)
+  if (correctCount + mistakes > 0) {
+    if (!confirm('Return to main menu? Your current game progress will be lost (score will not be saved).')) {
+      return;
+    }
+  }
+  // Reset map to fresh state for next session
+  for (const name of allCountryNames) {
+    setCountryState(name, 'grey');
+    if (countryLayers[name]) countryLayers[name].unbindTooltip();
+  }
+  score = 0;
+  correctCount = 0;
+  mistakes = 0;
+  currentSelection = null;
+  canSelect = true;
+  clearCountdown();
+  document.getElementById('options').innerHTML = '';
+  document.getElementById('options').style.display = '';
+  document.querySelector('.legend').style.display = '';
+  document.getElementById('continue-btn-container').innerHTML = '';
+  document.getElementById('fact-card-container').innerHTML = '';
+  document.getElementById('options-title').style.display = 'none';
+  document.getElementById('name-input').value = '';
+  showScreen('screen-name');
+  setTimeout(() => document.getElementById('name-input').focus(), 100);
+}
+
+function changePlayer() {
+  document.getElementById('name-input').value = '';
+  document.getElementById('loading-status').textContent =
+    `✅ Loaded ${sovereignCount} countries + ${territoryCount} territories — ready to play!`;
+  showScreen('screen-name');
+  setTimeout(() => document.getElementById('name-input').focus(), 100);
+}
+
+// ============================================================
+// EVENT LISTENERS + BOOT
+// ============================================================
+document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('name-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !document.getElementById('start-btn').disabled) startGame();
+});
+
+window.addEventListener('load', () => {
+  initMap().catch(err => {
+    console.error('Map init failed:', err);
+    document.getElementById('loading-status').innerHTML =
+      '❌ Failed to load map data. Please check your internet connection and refresh the page.';
+  });
+
+  // Register service worker for PWA installability + basic offline shell.
+  // (Skipped on file:// — only works on http(s) origins.)
+  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('service-worker.js')
+      .catch(err => console.warn('SW registration failed:', err));
+  }
+});
+</script>
+</body>
+</html>

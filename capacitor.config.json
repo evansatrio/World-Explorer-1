@@ -1,0 +1,13 @@
+{
+  "appId": "com.worldquiz.app",
+  "appName": "World Quiz",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false
+  }
+}

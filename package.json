@@ -1,0 +1,21 @@
+{
+  "name": "world-country-quiz",
+  "version": "1.0.0",
+  "description": "World country guessing game — packaged for Android via Capacitor",
+  "private": true,
+  "scripts": {
+    "cap:init": "npx cap init \"World Quiz\" com.worldquiz.app --web-dir=www",
+    "cap:add:android": "npx cap add android",
+    "cap:sync": "npx cap sync android",
+    "build:web": "node ./scripts/copy-web.mjs",
+    "build:android": "npm run build:web && npx cap sync android && cd android && ./gradlew assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.1.2",
+    "@capacitor/core": "^6.1.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.1.2",
+    "@capacitor/assets": "^3.0.5"
+  }
+}
