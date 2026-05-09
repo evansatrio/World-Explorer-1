@@ -1,0 +1,28 @@
+# Node
+node_modules/
+npm-debug.log*
+
+# Capacitor / Android build outputs
+android/
+ios/
+www/
+.gradle/
+build/
+*.apk
+*.aab
+*.keystore
+*.jks
+local.properties
+
+# Capacitor assets generation cache
+.capacitor-assets/
+assets/
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
